@@ -1,0 +1,83 @@
+# build-template.yml
+# Reusable build pipeline template for Azure DevOps
+# Handles: restore, build, test, and publish stages
+
+parameters:
+  - name: buildConfiguration
+    type: string
+    default: 'Release'
+    values:
+      - Release
+      - Debug
+
+  - name: dotnetVersion
+    type: string
+    default: '8.0.x'
+
+  - name: runTests
+    type: boolean
+    default: true
+
+  - name: publishArtifact
+    type: boolean
+    default: true
+
+  - name: artifactName
+    type: string
+    default: 'drop'
+
+stages:
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - job: BuildJob
+        displayName: 'Build Application'
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          # Step 1 — Setup .NET
+          - task: UseDotNet@2
+            displayName: 'Install .NET ${{ parameters.dotnetVersion }}'
+            inputs:
+              packageType: 'sdk'
+              version: '${{ parameters.dotnetVersion }}'
+
+          # Step 2 — Restore dependencies
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore NuGet packages'
+            inputs:
+              command: 'restore'
+              projects: '**/*.csproj'
+
+          # Step 3 — Build
+          - task: DotNetCoreCLI@2
+            displayName: 'Build solution'
+            inputs:
+              command: 'build'
+              projects: '**/*.csproj'
+              arguments: '--configuration ${{ parameters.buildConfiguration }} --no-restore'
+
+          # Step 4 — Run tests (conditional)
+          - ${{ if eq(parameters.runTests, true) }}:
+            - task: DotNetCoreCLI@2
+              displayName: 'Run unit tests'
+              inputs:
+                command: 'test'
+                projects: '**/*Tests/*.csproj'
+                arguments: '--configuration ${{ parameters.buildConfiguration }} --no-build --collect:"XPlat Code Coverage"'
+
+          # Step 5 — Publish artifact (conditional)
+          - ${{ if eq(parameters.publishArtifact, true) }}:
+            - task: DotNetCoreCLI@2
+              displayName: 'Publish application'
+              inputs:
+                command: 'publish'
+                publishWebProjects: true
+                arguments: '--configuration ${{ parameters.buildConfiguration }} --output $(Build.ArtifactStagingDirectory)'
+
+            - task: PublishBuildArtifacts@1
+              displayName: 'Upload artifact: ${{ parameters.artifactName }}'
+              inputs:
+                pathToPublish: '$(Build.ArtifactStagingDirectory)'
+                artifactName: '${{ parameters.artifactName }}'

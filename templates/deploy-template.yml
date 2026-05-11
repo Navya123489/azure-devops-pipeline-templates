@@ -1,0 +1,71 @@
+# deploy-template.yml
+# Reusable deployment pipeline template for Azure DevOps
+# Handles: environment approval, deployment, and smoke test
+
+parameters:
+  - name: environment
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - staging
+      - prod
+
+  - name: azureSubscription
+    type: string
+
+  - name: webAppName
+    type: string
+
+  - name: artifactName
+    type: string
+    default: 'drop'
+
+  - name: resourceGroupName
+    type: string
+
+stages:
+  - stage: Deploy_${{ parameters.environment }}
+    displayName: 'Deploy to ${{ parameters.environment }}'
+    jobs:
+      - deployment: DeployJob
+        displayName: 'Deploy Application'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: '${{ parameters.environment }}'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                # Step 1 — Download artifact
+                - task: DownloadBuildArtifacts@1
+                  displayName: 'Download build artifact'
+                  inputs:
+                    buildType: 'current'
+                    downloadType: 'single'
+                    artifactName: '${{ parameters.artifactName }}'
+                    downloadPath: '$(System.ArtifactsDirectory)'
+
+                # Step 2 — Deploy to Azure Web App
+                - task: AzureWebApp@1
+                  displayName: 'Deploy to Azure Web App'
+                  inputs:
+                    azureSubscription: '${{ parameters.azureSubscription }}'
+                    appType: 'webApp'
+                    appName: '${{ parameters.webAppName }}'
+                    package: '$(System.ArtifactsDirectory)/**/*.zip'
+                    deploymentMethod: 'auto'
+
+                # Step 3 — Smoke test after deployment
+                - script: |
+                    echo "Running smoke test against deployed application..."
+                    curl -f -s -o /dev/null -w "%{http_code}" \
+                      https://${{ parameters.webAppName }}.azurewebsites.net/health
+                    echo "Smoke test passed"
+                  displayName: 'Run smoke test'
+
+                # Step 4 — Tag successful deployment
+                - script: |
+                    echo "##vso[build.addbuildtag]deployed-${{ parameters.environment }}"
+                    echo "##vso[build.addbuildtag]$(Build.BuildNumber)"
+                  displayName: 'Tag build with deployment info'

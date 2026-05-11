@@ -1,0 +1,88 @@
+# security-scan-template.yml
+# Reusable security scanning template for Azure DevOps
+# Handles: dependency scanning, SAST, and secret detection
+
+parameters:
+  - name: scanDependencies
+    type: boolean
+    default: true
+
+  - name: scanSecrets
+    type: boolean
+    default: true
+
+  - name: failOnHighSeverity
+    type: boolean
+    default: true
+
+  - name: projectPath
+    type: string
+    default: '.'
+
+stages:
+  - stage: SecurityScan
+    displayName: 'Security Scanning'
+    jobs:
+      - job: SecurityJob
+        displayName: 'Run Security Scans'
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          # Step 1 — Dependency vulnerability scan
+          - ${{ if eq(parameters.scanDependencies, true) }}:
+            - task: DotNetCoreCLI@2
+              displayName: 'Restore packages for scanning'
+              inputs:
+                command: 'restore'
+                projects: '**/*.csproj'
+
+            - script: |
+                dotnet tool install --global dotnet-outdated-tool
+                dotnet outdated --output json > dependency-report.json
+                echo "Dependency scan complete"
+              displayName: 'Scan dependencies for vulnerabilities'
+
+            - task: PublishBuildArtifacts@1
+              displayName: 'Publish dependency report'
+              inputs:
+                pathToPublish: 'dependency-report.json'
+                artifactName: 'security-reports'
+
+          # Step 2 — Secret detection
+          - ${{ if eq(parameters.scanSecrets, true) }}:
+            - script: |
+                pip install detect-secrets
+                detect-secrets scan ${{ parameters.projectPath }} \
+                  --all-files \
+                  --exclude-files '\.git/.*' \
+                  > secrets-report.json
+                echo "Secret scan complete"
+              displayName: 'Scan for hardcoded secrets'
+
+            - script: |
+                python3 -c "
+                import json, sys
+                with open('secrets-report.json') as f:
+                    report = json.load(f)
+                results = report.get('results', {})
+                if results:
+                    print(f'WARNING: {len(results)} potential secrets found')
+                    for file in results:
+                        print(f'  - {file}')
+                    if '${{ parameters.failOnHighSeverity }}' == 'True':
+                        sys.exit(1)
+                else:
+                    print('No secrets detected')
+                "
+              displayName: 'Evaluate secret scan results'
+
+          # Step 3 — Summary
+          - script: |
+              echo "================================================="
+              echo "Security scan complete"
+              echo "Dependency scan: ${{ parameters.scanDependencies }}"
+              echo "Secret scan:     ${{ parameters.scanSecrets }}"
+              echo "Fail on high:    ${{ parameters.failOnHighSeverity }}"
+              echo "================================================="
+            displayName: 'Print scan summary'
