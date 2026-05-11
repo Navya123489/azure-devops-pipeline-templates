@@ -1,0 +1,50 @@
+# dotnet-app-pipeline.yml
+# Complete end-to-end pipeline for a .NET web application
+# Uses the reusable templates from the templates/ folder
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - README.md
+      - docs/*
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  buildConfiguration: 'Release'
+  webAppName: 'myproject-webapp-dev'
+  azureSubscription: 'MyAzureSubscription'
+  resourceGroupName: 'rg-myproject-dev'
+
+stages:
+  # Stage 1 — Security scan first
+  - template: ../templates/security-scan-template.yml
+    parameters:
+      scanDependencies: true
+      scanSecrets: true
+      failOnHighSeverity: true
+
+  # Stage 2 — Build and test
+  - template: ../templates/build-template.yml
+    parameters:
+      buildConfiguration: $(buildConfiguration)
+      dotnetVersion: '8.0.x'
+      runTests: true
+      publishArtifact: true
+      artifactName: 'drop'
+
+  # Stage 3 — Deploy to dev
+  - template: ../templates/deploy-template.yml
+    parameters:
+      environment: 'dev'
+      azureSubscription: $(azureSubscription)
+      webAppName: $(webAppName)
+      artifactName: 'drop'
+      resourceGroupName: $(resourceGroupName)
